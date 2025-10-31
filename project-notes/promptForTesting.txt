@@ -1,0 +1,1 @@
+create a note taking app with folders and tags

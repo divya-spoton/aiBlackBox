@@ -1,0 +1,7 @@
+context passing system
+better frontend -  rn its just basic html css js
+Preview System - Currently you have no way to show the generated site to users
+right now firebase works but do we need the agent to create separate backend that manages auth, db, api, etc and the react frontend will call the backend
+"Deploy" button that appears when project is completed
+review and test loop
+different agents to focus on different parts

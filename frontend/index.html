@@ -81,11 +81,7 @@
                 const j = await r.json();
                 document.getElementById('status').textContent = j.status + (j.iteration ? ' (iter: ' + j.iteration + ')' : '');
                 document.getElementById('logs').textContent = (j.logs || []).map(l => new Date(l.timestamp).toLocaleTimeString() + '  ' + l.message).join('\\n') || '';
-                if (j.deployUrl || j.previewUrl) {
-                    const url = j.previewUrl || j.deployUrl;
-                    document.getElementById('previewArea').innerHTML = `<iframe src="${url}"></iframe>`;
-                    document.getElementById('stopPreview').style.display = 'inline-block';
-                }
+                 
                 if (j.status === 'completed' || j.status === 'failed') {
                     clearInterval(pollInterval);
                 }

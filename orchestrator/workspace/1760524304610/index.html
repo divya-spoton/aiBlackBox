@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Note Taking App</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header>
+  <h1>Note Taking App</h1>
+</header>
+<main>
+  <section class="folder-section">
+    <h2>Folders</h2>
+    <input type="text" id="newFolderName" placeholder="Add new folder" />
+    <button onclick="addFolder()">Add Folder</button>
+    <ul id="folderList"></ul>
+  </section>
+  <section class="notes-section">
+    <h2>Notes</h2>
+    <div>
+      <input type="text" id="newNoteTitle" placeholder="Note title" />
+      <textarea id="newNoteContent" placeholder="Note content"></textarea>
+      <input type="text" id="newNoteTags" placeholder="Tags (comma-separated)" />
+      <select id="folderSelect">
+        <option value="">Select folder</option>
+      </select>
+      <button onclick="addNote()">Add Note</button>
+    </div>
+    <ul id="noteList"></ul>
+  </section>
+</main>
+<script src="app.js"></script>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script>
+        // Firebase Configuration (Auto-injected)
+        const firebaseConfig = {
+  "apiKey": "AIzaSyCzsdSvUIX8QmS2o2dLceX6g6unqZNtA3Q",
+  "authDomain": "aiblackbox.firebaseapp.com",
+  "projectId": "aiblackbox",
+  "storageBucket": "aiblackbox.appspot.com",
+  "messagingSenderId": "440183914199",
+  "appId": "1:440183914199:web:76160d110508601ecdfa92"
+};
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const PROJECT_NAMESPACE = 'projects/1760524304610';
+
+        // Real-time listener for folders
+        db.collection(`${PROJECT_NAMESPACE}/collections/folders`).onSnapshot(snapshot => {
+          const folderList = document.getElementById('folderList');
+          const folderSelect = document.getElementById('folderSelect');
+          folderList.innerHTML = '';
+          folderSelect.innerHTML = '<option value="">Select folder</option>';
+
+          snapshot.forEach(doc => {
+            const folder = doc.data();
+            const li = document.createElement('li');
+            li.textContent = folder.name;
+            folderList.appendChild(li);
+
+            const option = document.createElement('option');
+            option.value = doc.id;
+            option.textContent = folder.name;
+            folderSelect.appendChild(option);
+          });
+        }, error => {
+          console.error('Error listening to folders:', error);
+          alert('Failed to listen to folders');
+        });
+
+        // Real-time listener for notes
+        db.collection(`${PROJECT_NAMESPACE}/collections/notes`).onSnapshot(snapshot => {
+          const noteList = document.getElementById('noteList');
+          noteList.innerHTML = '';
+
+          snapshot.forEach(doc => {
+            const note = doc.data();
+            const li = document.createElement('li');
+            li.textContent = `${note.title} - ${note.content.substring(0, 100)}...`;
+            noteList.appendChild(li);
+          });
+        }, error => {
+          console.error('Error listening to notes:', error);
+          alert('Failed to listen to notes');
+        });
+    </script>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script>
+        // Firebase Configuration (Auto-injected)
+        const firebaseConfig = {
+  "apiKey": "AIzaSyCzsdSvUIX8QmS2o2dLceX6g6unqZNtA3Q",
+  "authDomain": "aiblackbox.firebaseapp.com",
+  "projectId": "aiblackbox",
+  "storageBucket": "aiblackbox.appspot.com",
+  "messagingSenderId": "440183914199",
+  "appId": "1:440183914199:web:76160d110508601ecdfa92"
+};
+        firebase.initializeApp(firebaseConfig);
+        const PROJECT_NAMESPACE = 'projects/1760524304610';
+    </script>
+</body>
+</html>

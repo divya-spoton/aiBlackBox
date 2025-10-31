@@ -4,17 +4,13 @@ import dotenv from 'dotenv';
 import { GeneratorAgent } from './agents/generator.js';
 import { ReviewAgent } from './agents/reviewer.js';
 import { TestAgent } from './agents/test.js';
-import { DeployAgent } from './agents/deploy.js';
 import { GitAgent } from './agents/git.js';
 import { writeFiles, cleanWorkspace } from './utils/file.js';
-import { LocalDeployAgent } from './agents/deploy_local.js';
 import path from 'path';
 import fs from 'fs/promises';
 import { exec } from 'child_process';
 import { promisify } from 'util';
-import { VersionManager } from './utils/versionManager.js';
-import { FirebaseAgent } from './agents/firebase.js';
-
+import { DatabaseAgent } from './agents/database.js';
 
 dotenv.config();
 
@@ -96,57 +92,52 @@ app.post('/api/stop-preview/:id', async (req, res) => {
     res.json({ stopped: false, message: 'No local preview running' });
 });
 
-app.get('/api/versions/:id', async (req, res) => {
-    const project = projects.get(req.params.id);
-    if (!project) {
-        return res.status(404).json({ error: 'Project not found' });
-    }
 
-    const versionManager = new VersionManager(req.params.id);
-    const versions = await versionManager.getVersions();
-    res.json({ versions });
-});
 
 async function buildProject(projectId, prompt) {
     const project = projects.get(projectId);
     const MAX_ITERATIONS = 5;
 
     try {
-        // Step 1: Generate initial code
-        addLog(project, 'Generating initial code...');
-        
-        const firebaseAgent = new FirebaseAgent();
-        const dbCheck = await firebaseAgent.needsDatabase(prompt);
-        const useFirebase = dbCheck.needs;
+        // Step 1: Provision Firebase namespace
+        addLog(project, 'Setting up Firebase database...');
+        const dbAgent = new DatabaseAgent();
+        const dbInfo = await dbAgent.provisionDatabase(projectId);
+        project.dbInfo = dbInfo;
+        addLog(project, `Firebase ready. Namespace: ${dbInfo.namespace}`);
 
-        if (useFirebase) {
-            addLog(project, `Database needed: ${dbCheck.reason}`);
-            addLog(project, 'Configuring Firebase integration...');
+        // Step 2: Generate code - AI figures out collections and queries
+        addLog(project, 'Generating code with database integration...');
+        const generator = new GeneratorAgent();
+        let generatedCode = await generator.generate(
+            prompt,
+            dbInfo.namespace,
+            dbInfo.config
+        );
 
-            // Show setup instructions
-            const instructions = firebaseAgent.getSetupInstructions(projectId);
-            project.firebaseSetup = instructions;
-            addLog(project, '⚠️  Firebase setup required (see firebaseSetup in status)');
+        // Log what collections the AI decided to create
+        if (generatedCode.database?.collections) {
+            const collectionNames = generatedCode.database.collections.map(c => c.name).join(', ');
+            addLog(project, `AI created collections: ${collectionNames}`);
+
+            // Optional: Log collection schemas to backend
+            for (const col of generatedCode.database.collections) {
+                await dbAgent.logCollection(projectId, col.name, col.fields);
+            }
         }
 
-        const generator = new GeneratorAgent();
-        let generatedCode = await generator.generate(prompt, useFirebase);
-        console.log('Generated files:', generatedCode.files.map(f => f.path));
-
-        //     // Write files to workspace
+        // Write files to workspace
         const workspacePath = `./workspace/${projectId}`;
         await writeFiles(workspacePath, generatedCode.files);
         addLog(project, `Generated ${generatedCode.files.length} files`);
 
-        // Save version
-        const versionManager = new VersionManager(projectId);
-        await versionManager.initialize();
-        await versionManager.saveVersion(generatedCode.files, 'Initial generation');
-        addLog(project, 'Version saved');
 
-        // Step 2: Review & Test Loop
+
+        // Step 3: Review & Test Loop with better logic
+        // Step 3: Review & Test Loop
         const reviewer = new ReviewAgent();
         const tester = new TestAgent();
+        let consecutiveFailures = 0; // Track if we're stuck
 
         for (let i = 0; i < MAX_ITERATIONS; i++) {
             project.iteration = i + 1;
@@ -156,52 +147,88 @@ async function buildProject(projectId, prompt) {
             addLog(project, 'Reviewing code...');
             const review = await reviewer.review(generatedCode.files);
             addLog(project, `Review: ${review.issues.length} issues found`);
-            addLog(project, `Summary: ${review.summary || ''}`);
+            if (review.summary) {
+                addLog(project, `Summary: ${review.summary}`);
+            }
+
+            // After review
+            addLog(project, `Review: ${review.issues.length} issues found`);
+
+            // ADD THIS - log the actual issues
+            if (review.issues.length > 0 && review.issues.length <= 5) {
+                review.issues.forEach(issue => {
+                    addLog(project, `  [${issue.severity}] ${issue.file}: ${issue.message}`);
+                });
+            } else if (review.issues.length > 5) {
+                addLog(project, `  (${criticalIssues.length} critical, ${importantIssues.length} important, ${review.issues.length - criticalOrImportant.length} minor)`);
+            }
 
             // Test code
             addLog(project, 'Testing code...');
             const testResults = await tester.test(workspacePath);
             addLog(project, `Tests: ${testResults.passed ? 'PASSED' : 'FAILED'}`);
 
+            // Log specific errors for debugging
+            if (testResults.errors && testResults.errors.length > 0) {
+                testResults.errors.forEach(err => addLog(project, `  - ${err}`));
+            }
+
             // Classify issues by severity
-            const criticalOrImportant = (review.issues || []).filter(
-                it => it.severity === 'critical' || it.severity === 'important'
-            );
-            const minorOnly = (review.issues || []).length > 0 && criticalOrImportant.length === 0;
+            const criticalIssues = (review.issues || []).filter(it => it.severity === 'critical');
+            const importantIssues = (review.issues || []).filter(it => it.severity === 'important');
+            const criticalOrImportant = [...criticalIssues, ...importantIssues];
 
-            // If no critical/important issues and tests pass -> success
+            // EXIT CONDITIONS:
+
+            // 1. Perfect state: no critical/important issues AND tests pass
             if (criticalOrImportant.length === 0 && testResults.passed) {
-                addLog(project, '✓ No critical/important issues and tests passed — finishing loop.');
-                // Mark approved if the LLM didn't already
-                review.approved = true;
+                addLog(project, '✓ All critical/important issues resolved and tests passed!');
                 break;
             }
 
-            // If only minor issues (and tests passed), proceed without more fix iterations
-            if (minorOnly && testResults.passed) {
-                addLog(project, 'Only minor issues remain and tests passed — proceeding without further fixes.');
+            // 2. Good enough: only minor issues AND tests pass
+            if (criticalIssues.length === 0 && importantIssues.length === 0 && testResults.passed) {
+                addLog(project, '✓ Only minor issues remain, tests passed - proceeding.');
                 break;
             }
 
-            // If there are critical/important issues and we still have iterations left, request fixes
-            if (criticalOrImportant.length > 0 && i < MAX_ITERATIONS - 1) {
-                addLog(project, `Generating fixes for ${criticalOrImportant.length} critical/important issues...`);
-                // Only pass the critical/important issues to generator.fix so it ignores minor formatting/style suggestions
-                generatedCode = await generator.fix(
-                    generatedCode.files,
-                    criticalOrImportant,
-                    testResults.errors
-                );
-                // Re-write files and continue
-                await writeFiles(workspacePath, generatedCode.files);
-                addLog(project, `Wrote fixed files (iteration ${i + 1})`);
-                // continue to next iteration
-                continue;
+            // 3. Stuck detection: same issues persisting for 2+ iterations
+            if (criticalOrImportant.length > 0 && testResults.passed) {
+                // Tests pass but still has issues - might be stuck on subjective things
+                consecutiveFailures++;
+                if (consecutiveFailures >= 2) {
+                    addLog(project, '⚠ Review loop stuck - proceeding anyway (tests pass).');
+                    break;
+                }
+            } else {
+                consecutiveFailures = 0; // Reset counter if making progress
             }
 
-            // If we've reached here it means either max iterations or only issues that won't be fixed automatically
-            addLog(project, 'Reached iteration limit or no auto-fixable issues remain. Proceeding to commit/deploy.');
-            break;
+            // 4. Max iterations reached
+            if (i >= MAX_ITERATIONS - 1) {
+                addLog(project, '⚠ Max iterations reached - proceeding with current version.');
+                break;
+            }
+
+            // ATTEMPT FIX
+            if (criticalOrImportant.length > 0 || !testResults.passed) {
+                addLog(project, `Fixing ${criticalOrImportant.length} critical/important issues...`);
+
+                try {
+                    generatedCode = await generator.fix(
+                        generatedCode.files,
+                        criticalOrImportant,
+                        testResults.errors,
+                        dbInfo.namespace,
+                        dbInfo.config
+                    );
+                    await writeFiles(workspacePath, generatedCode.files);
+                    addLog(project, 'Applied fixes, re-checking...');
+                } catch (fixError) {
+                    addLog(project, `Fix attempt failed: ${fixError.message}`);
+                    break; // Don't keep trying if fix itself errors
+                }
+            }
         }
 
 
@@ -212,43 +239,8 @@ async function buildProject(projectId, prompt) {
         // project.repoUrl = repoUrl;
         // addLog(project, `Committed to: ${repoUrl}`);
 
-        // Step 4: Deploy (choose local preview when USE_LOCAL_PREVIEW=true)
-        addLog(project, 'Deploying...');
 
-        let deployUrl = null;
 
-        try {
-            if (process.env.USE_LOCAL_PREVIEW === 'true') {
-                addLog(project, 'Starting local preview server...');
-                const localDeployer = new LocalDeployAgent();
-                const res = await localDeployer.serve(path.resolve(workspacePath));
-                // res is { url, stop } — older implementation may return just url; handle both
-                if (res && typeof res === 'object' && res.url) {
-                    project.previewUrl = res.url;
-                    // save stop function so we can stop later if needed
-                    project._localStop = res.stop || null;
-                    deployUrl = res.url;
-                } else {
-                    // fallback if serve returned a string URL
-                    project.previewUrl = res;
-                    deployUrl = res;
-                }
-            } else {
-                // Cloud deploy path
-                const deployer = new DeployAgent();
-                deployUrl = await deployer.deploy(workspacePath);
-                project.deployUrl = deployUrl;
-            }
-
-            project.deployUrl = deployUrl;
-            addLog(project, `Deployed to: ${deployUrl}`);
-        } catch (err) {
-            addLog(project, `✗ Error during deploy: ${err.message}`);
-            // If deploy failed, still continue to set status and error
-            project.status = 'failed';
-            project.error = err.message;
-            throw err;
-        }
 
 
 
@@ -286,7 +278,11 @@ User requested change: ${changeRequest}
 Update the application to incorporate this change. Return the COMPLETE updated files.
 `;
 
-        const updatedCode = await generator.generate(iterationPrompt);
+        const updatedCode = await generator.generate(
+            iterationPrompt,
+            project.dbInfo.namespace,
+            project.dbInfo.config
+        );
 
         // Write updated files
         await writeFiles(workspacePath, updatedCode.files);
@@ -298,7 +294,13 @@ Update the application to incorporate this change. Return the COMPLETE updated f
 
         if (!testResults.passed) {
             addLog(project, 'Tests failed, applying fixes...');
-            const fixedCode = await generator.fix(updatedCode.files, [], testResults.errors);
+            const fixedCode = await generator.fix(
+                updatedCode.files,
+                [],
+                testResults.errors,
+                project.dbInfo.namespace,
+                project.dbInfo.config
+            );
             await writeFiles(workspacePath, fixedCode.files);
         }
 

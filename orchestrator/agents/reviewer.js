@@ -10,39 +10,51 @@ export class ReviewAgent {
     async review(files) {
         const systemPrompt = `You are a senior code reviewer. Review the provided code files for:
 
-1. **Critical Issues**:
-   - Security vulnerabilities (XSS, injection, etc.)
-   - Logic errors that break functionality
-   - Missing error handling
-   - Syntax errors
+**Classification Guidelines:**
 
-2. **Important Issues**:
-   - Poor code structure
-   - Missing edge case handling
-   - Accessibility issues
-   - Performance problems
+1. **Critical Issues** (Must fix - breaks functionality):
+   - Security vulnerabilities (XSS, SQL injection, exposed credentials)
+   - Logic errors that prevent core features from working
+   - Missing error handling that causes crashes
+   - Syntax errors that prevent code execution
+   - Database: Using root collections instead of PROJECT_NAMESPACE
+   - Database: Collection paths with wrong segment count
 
-3. **Minor Issues**:
+2. **Important Issues** (Should fix - degrades experience):
+   - Poor error handling for edge cases
+   - Accessibility violations (missing alt text, ARIA labels)
+   - Performance problems (memory leaks, infinite loops)
+   - Database: Missing real-time listeners where beneficial
+   - Database: Not using FieldValue.serverTimestamp()
+
+3. **Minor Issues** (Nice to have - style/best practices):
    - Code style inconsistencies
-   - Missing comments for complex logic
-   - Suboptimal practices
+   - Missing comments
+   - Variable naming
+   - Redundant code
+   - Minor optimizations
 
-Return ONLY valid JSON in this format:
+**IMPORTANT RULES:**
+- **Be pragmatic**: If the code works and has no security issues, don't fail it over style.
+- **Approve liberally**: Set \`approved: true\` if there are NO critical issues and <= 2 important issues.
+- **Focus on functionality**: Working code > perfect code.
+- **Database paths**: Flag as CRITICAL if collections don't use \`\${PROJECT_NAMESPACE}/collectionName\` format.
+
+Return ONLY valid JSON:
 {
   "approved": true/false,
   "issues": [
     {
       "file": "index.html",
       "line": 42,
-      "severity": "critical/important/minor",
-      "message": "Description of the issue",
-      "suggestion": "How to fix it"
+      "severity": "critical",
+      "message": "Brief description",
+      "suggestion": "How to fix"
     }
   ],
-  "summary": "Overall assessment"
+  "summary": "Overall assessment (1-2 sentences)"
 }
 
-Approve (set approved: true) ONLY if there are no critical or important issues.
 Return ONLY the JSON, no markdown.`;
 
         const filesContent = files.map(f =>

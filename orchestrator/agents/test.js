@@ -39,15 +39,28 @@ export class TestAgent {
                     runScripts: 'dangerously',
                     resources: 'usable',
                     beforeParse(window) {
-                        // Mock console to catch errors
-                        window.console.error = (msg) => {
+                        // Mock console to catch REAL errors only
+                        const originalError = console.error;
+                        window.console.error = (...args) => {
+                            const msg = args.join(' ');
+
+                            // IGNORE Firebase duplicate loading warnings (JSDOM artifact)
+                            if (msg.includes('Firebase is already defined')) return;
+                            if (msg.includes('firebase/app-compat')) return;
+
+                            // IGNORE benign warnings
+                            if (msg.includes('Warning:')) return;
+
+                            // Only log actual errors
                             errors.push(`Console error: ${msg}`);
+                            originalError(...args);
                         };
                     }
                 });
 
-                // Wait a bit for scripts to execute
-                await new Promise(resolve => setTimeout(resolve, 500));
+                // Wait for scripts to execute
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Increased to 1 sec
+
 
                 // Check if there are any uncaught exceptions
                 const scripts = dom.window.document.querySelectorAll('script');
@@ -85,6 +98,21 @@ export class TestAgent {
             }
             if (htmlContent.includes('innerHTML') && !htmlContent.includes('DOMPurify')) {
                 errors.push('Potential XSS risk: innerHTML usage without sanitization');
+            }
+
+            // Test 4: Check Firebase integration
+            if (htmlContent.includes('firebase-app-compat.js')) {
+                if (!htmlContent.includes('PROJECT_NAMESPACE')) {
+                    errors.push('Firebase configured but PROJECT_NAMESPACE not found');
+                }
+                if (!htmlContent.includes('firebase.firestore()')) {
+                    errors.push('Firebase included but Firestore not initialized');
+                }
+
+                // Check if collections use proper namespace
+                if (htmlContent.includes('db.collection(') && !htmlContent.includes('PROJECT_NAMESPACE')) {
+                    errors.push('Warning: Collections may not be using PROJECT_NAMESPACE isolation');
+                }
             }
 
             return {

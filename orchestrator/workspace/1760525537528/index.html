@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Note Taking App</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <h1>Note Taking App</h1>
+    </header>
+    <main>
+        <section id="folderSection">
+            <h2>Folders</h2>
+            <input type="text" id="newFolderName" placeholder="New Folder Name" />
+            <button onclick="addFolder()">Add Folder</button>
+            <ul id="folderList"></ul>
+        </section>
+        <section id="noteSection">
+            <h2>Notes</h2>
+            <div id="noteForm">
+                <input type="text" id="newNoteTitle" placeholder="Note Title" />
+                <textarea id="newNoteContent" placeholder="Note Content"></textarea>
+                <input type="text" id="newNoteTags" placeholder="Tags (comma-separated)" />
+                <select id="folderSelect"></select>
+                <button onclick="addNote()">Add Note</button>
+            </div>
+            <ul id="noteList"></ul>
+        </section>
+    </main>
+    <script src="app.js"></script>
+
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script>
+        // Firebase Configuration
+        const firebaseConfig = {
+  "apiKey": "AIzaSyCzsdSvUIX8QmS2o2dLceX6g6unqZNtA3Q",
+  "authDomain": "aiblackbox.firebaseapp.com",
+  "projectId": "aiblackbox",
+  "storageBucket": "aiblackbox.appspot.com",
+  "messagingSenderId": "440183914199",
+  "appId": "1:440183914199:web:76160d110508601ecdfa92"
+};
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+        const PROJECT_NAMESPACE = 'projects/1760525537528';
+    </script>
+</body>
+</html>
